@@ -1,8 +1,12 @@
-// api/chat.js — simple streaming via Chat Completions
+// api/chat.js — stable streaming + CORS lock to your Carrd
 export const config = { runtime: "nodejs" };
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+// Only allow your live Carrd site to call this API.
+// While testing you can set ALLOW_ORIGIN = "*" then switch back.
+const ALLOW_ORIGIN = "https://purelyhomecare.carrd.co";
 
 const SYSTEM = `
 You are the Purely Homecare Assistant.
@@ -30,9 +34,9 @@ End each reply with ONE next step (email or form link).
 `;
 
 export default async function handler(req, res) {
-  // CORS
-  res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
+  const origin = req.headers.origin || "";
   res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Origin", ALLOW_ORIGIN === "*" ? "*" : (origin === ALLOW_ORIGIN ? origin : "null"));
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(204).end();
@@ -42,16 +46,16 @@ export default async function handler(req, res) {
   try {
     const { messages = [] } = req.body || {};
 
-    // Convert our messages to Chat Completions format
+    // Convert to Chat Completions format
     const chatMessages = [
       { role: "system", content: SYSTEM },
       ...messages.map(m => ({
         role: m.role === "assistant" ? "assistant" : "user",
         content: String(m.content || "")
-      }))
+      })),
     ];
 
-    // Stream from Chat Completions (very stable)
+    // Stream from Chat Completions
     const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -72,7 +76,6 @@ export default async function handler(req, res) {
     }
 
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Transfer-Encoding", "chunked");
 
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder();
@@ -96,7 +99,7 @@ export default async function handler(req, res) {
           const delta = json.choices?.[0]?.delta?.content;
           if (delta) res.write(encoder.encode(delta));
         } catch {
-          // ignore keepalives / partials
+          /* ignore keepalives */
         }
       }
     }
