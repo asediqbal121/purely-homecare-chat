@@ -1,0 +1,12 @@
+{
+  "name": "purely-homecare-chat",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "vercel dev --yes",
+    "start": "node",
+    "deploy": "vercel --prod"
+  }
+}
