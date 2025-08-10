@@ -1,12 +1,11 @@
-// api/chat.js — stable streaming + CORS lock to your Carrd
+// api/chat.js — stable streaming + CORS + no in-answer contact CTAs
 export const config = { runtime: "nodejs" };
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-// Only allow your live Carrd site to call this API.
-// While testing you can set ALLOW_ORIGIN = "*" then switch back.
-const ALLOW_ORIGIN = "https://purelyhomecare.carrd.co";
+// Allow your Carrd site (add your custom domain here later if you get one)
+const ALLOWED = ["https://purelyhomecare.carrd.co"];
 
 const SYSTEM = `
 You are the Purely Homecare Assistant.
@@ -19,24 +18,19 @@ Facts to use:
 - Visit lengths: 30/45/60+ mins
 - Hours: 7am–10pm, on-call options
 - Registration: Care Inspectorate for Scotland
-- Contact: hello@purelyhomecare.co.uk
-- Enquiry form: https://purelyhomecare.carrd.co/#contact
 - Pricing stance: Written quote after assessment; no hidden fees.
 
-Default flow:
-1) How it works (enquire → assessment → plan & quote → start → 1-week review)
-2) Funding (Scotland SDS Options 1–4) — high level; councils vary
-3) Choosing a provider (what good looks like)
-Safety:
-- Urgent issues → 999, non-urgent medical → 111
-- Don’t request/store personal medical details; keep general.
-End each reply with ONE next step (email or form link).
+STYLE & BOUNDARIES:
+- Explain steps (enquire → assessment → plan & quote → start → 1-week review).
+- Outline SDS Options 1–4 (high level; councils vary).
+- Never output email addresses or URLs. Do NOT add contact calls-to-action.
+- End with a gentle, non-contact next step (e.g., “Would you like a quick 3-step plan?”).
 `;
 
 export default async function handler(req, res) {
   const origin = req.headers.origin || "";
   res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Origin", ALLOW_ORIGIN === "*" ? "*" : (origin === ALLOW_ORIGIN ? origin : "null"));
+  res.setHeader("Access-Control-Allow-Origin", ALLOWED.includes(origin) ? origin : "null");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(204).end();
@@ -45,8 +39,6 @@ export default async function handler(req, res) {
 
   try {
     const { messages = [] } = req.body || {};
-
-    // Convert to Chat Completions format
     const chatMessages = [
       { role: "system", content: SYSTEM },
       ...messages.map(m => ({
@@ -55,7 +47,6 @@ export default async function handler(req, res) {
       })),
     ];
 
-    // Stream from Chat Completions
     const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -76,7 +67,6 @@ export default async function handler(req, res) {
     }
 
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
-
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
@@ -89,7 +79,6 @@ export default async function handler(req, res) {
 
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
-
       for (const line of lines) {
         const t = line.trim();
         if (!t || t === "data: [DONE]") continue;
@@ -98,9 +87,7 @@ export default async function handler(req, res) {
           const json = JSON.parse(data);
           const delta = json.choices?.[0]?.delta?.content;
           if (delta) res.write(encoder.encode(delta));
-        } catch {
-          /* ignore keepalives */
-        }
+        } catch {}
       }
     }
     res.end();
