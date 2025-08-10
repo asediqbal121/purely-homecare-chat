@@ -1,13 +1,13 @@
-// api/chat.js  — Vercel Serverless Function (Node.js runtime, ESM)
+// api/chat.js — simple streaming via Chat Completions
 export const config = { runtime: "nodejs" };
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const MODEL = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const SYSTEM = `
 You are the Purely Homecare Assistant.
 Audience: families in Hamilton, North Lanarkshire, South Lanarkshire.
-Be warm, clear, concise (short paras + bullets). No medical/legal advice.
+Be warm, clear, concise (short paragraphs + bullets). No medical/legal advice.
 
 Facts to use:
 - Areas: Hamilton, North Lanarkshire, South Lanarkshire
@@ -42,7 +42,17 @@ export default async function handler(req, res) {
   try {
     const { messages = [] } = req.body || {};
 
-    const upstream = await fetch("https://api.openai.com/v1/responses", {
+    // Convert our messages to Chat Completions format
+    const chatMessages = [
+      { role: "system", content: SYSTEM },
+      ...messages.map(m => ({
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: String(m.content || "")
+      }))
+    ];
+
+    // Stream from Chat Completions (very stable)
+    const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${OPENAI_API_KEY}`,
@@ -50,10 +60,8 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: MODEL,
-        input: [
-          { role: "system", content: SYSTEM },
-          ...messages
-        ],
+        messages: chatMessages,
+        temperature: 0.3,
         stream: true,
       }),
     });
@@ -74,19 +82,22 @@ export default async function handler(req, res) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value);
-      const lines = buffer.split("\\n");
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
       buffer = lines.pop() || "";
+
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed === "data: [DONE]") continue;
-        const json = trimmed.startsWith("data:") ? trimmed.slice(5).trim() : trimmed;
+        const t = line.trim();
+        if (!t || t === "data: [DONE]") continue;
+        const data = t.startsWith("data:") ? t.slice(5).trim() : t;
         try {
-          const evt = JSON.parse(json);
-          if (evt.type === "response.output_text.delta" && typeof evt.delta === "string") {
-            res.write(encoder.encode(evt.delta));
-          }
-        } catch { /* ignore keepalives */ }
+          const json = JSON.parse(data);
+          const delta = json.choices?.[0]?.delta?.content;
+          if (delta) res.write(encoder.encode(delta));
+        } catch {
+          // ignore keepalives / partials
+        }
       }
     }
     res.end();
