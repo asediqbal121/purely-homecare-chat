@@ -1,0 +1,113 @@
+<!-- Carrd chat widget. Paste into Embed → Code (Before Body End). -->
+<style>
+  :root{ --phc-primary:#E87722; --phc-accent:#D4A76A; --phc-cream:#F8F3EF; --phc-text:#2E2E2E; }
+  .phc-chat-btn{ position:fixed; right:16px; bottom:16px; z-index:9999; background:var(--phc-primary); color:white; border:0; border-radius:999px; padding:12px 16px; font:600 14px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial; box-shadow:0 8px 24px rgba(0,0,0,.18); cursor:pointer; }
+  .phc-chat-panel{ position:fixed; right:16px; bottom:72px; z-index:9999; width:min(380px,92vw); max-height:70vh; background:white; border:1px solid #e7e5e4; border-radius:16px; overflow:hidden; display:none; box-shadow:0 24px 60px rgba(0,0,0,.18); }
+  .phc-chat-header{ background:var(--phc-cream); border-bottom:1px solid #eee; padding:12px 14px; display:flex; align-items:center; gap:8px; color:var(--phc-text); font:600 14px/1 system-ui; }
+  .phc-dot{ width:8px; height:8px; border-radius:999px; background:var(--phc-primary); display:inline-block; }
+  .phc-chat-body{ padding:12px; height:320px; overflow:auto; font:14px/1.5 system-ui; color:var(--phc-text); background:white; }
+  .phc-msg{ margin:8px 0; white-space:pre-wrap; }
+  .phc-msg.user{ color:#111; }
+  .phc-msg.bot{ color:var(--phc-text); }
+  .phc-chat-input{ display:flex; gap:8px; padding:10px; border-top:1px solid #eee; background:#fafafa; }
+  .phc-chat-input textarea{ flex:1; resize:none; height:42px; padding:10px; border:1px solid #ddd; border-radius:10px; font:14px/1.3 system-ui; }
+  .phc-send{ padding:0 14px; border:0; border-radius:10px; background:var(--phc-primary); color:#fff; font:600 14px; }
+  .phc-chipbar{ padding:8px 12px; border-top:1px solid #eee; background:#fcfcfc; display:flex; flex-wrap:wrap; gap:6px; }
+  .phc-chip{ font:12px/1 system-ui; border:1px solid #eee; border-radius:999px; padding:6px 10px; background:white; cursor:pointer; }
+  .phc-link{ color:var(--phc-primary); text-decoration:underline; }
+</style>
+
+<button class="phc-chat-btn" id="phcBtn" aria-controls="phcPanel" aria-expanded="false">Chat with us</button>
+
+<div class="phc-chat-panel" id="phcPanel" role="dialog" aria-label="Purely Homecare Assistant">
+  <div class="phc-chat-header"><span class="phc-dot"></span> Purely Homecare Assistant</div>
+  <div class="phc-chat-body" id="phcBody"></div>
+  <div class="phc-chipbar" id="phcChips"></div>
+  <div class="phc-chat-input">
+    <textarea id="phcText" placeholder="Type your question… (Enter to send)"></textarea>
+    <button class="phc-send" id="phcSend">Send</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const API = "https://YOUR-APP.vercel.app/api/chat"; // ← replace with your Vercel URL
+  const btn = document.getElementById('phcBtn');
+  const panel = document.getElementById('phcPanel');
+  const body = document.getElementById('phcBody');
+  const input = document.getElementById('phcText');
+  const send = document.getElementById('phcSend');
+  const chips = document.getElementById('phcChips');
+  const messages = []; // {role:"user"|"assistant", content:"..."}
+
+  const starters = [
+    "How do we get started with home care?",
+    "Do you cover my area? (I’m in ML3)",
+    "How does funding work in Scotland (SDS)?",
+    "What services and visit lengths do you offer?"
+  ];
+  starters.forEach(t=>{
+    const c=document.createElement('button'); c.className='phc-chip'; c.type='button'; c.textContent=t;
+    c.addEventListener('click', ()=>{ input.value=t; ask(); });
+    chips.appendChild(c);
+  });
+
+  function toggle(){
+    const open = panel.style.display === 'block';
+    panel.style.display = open ? 'none' : 'block';
+    btn.setAttribute('aria-expanded', String(!open));
+    if(!open) input.focus();
+  }
+  btn.addEventListener('click', toggle);
+  document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && panel.style.display==='block'){ toggle(); } });
+
+  function push(role, content){
+    messages.push({ role, content });
+    const div = document.createElement('div');
+    div.className = 'phc-msg ' + (role === 'user' ? 'user' : 'bot');
+    div.innerHTML = content.replace(/\\n/g,'<br>');
+    body.appendChild(div);
+    body.scrollTop = body.scrollHeight;
+    return div;
+  }
+
+  async function ask(){
+    const text = input.value.trim();
+    if(!text) return;
+    input.value = "";
+    push('user', text);
+    const botEl = push('assistant', ""); // streamed in
+
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages }),
+    });
+
+    if(!res.ok || !res.body){
+      botEl.textContent = "Sorry — something went wrong. Please try again or email ";
+      botEl.innerHTML += '<a class="phc-link" href="mailto:hello@purelyhomecare.co.uk">hello@purelyhomecare.co.uk</a>.';
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let acc = "";
+    while(true){
+      const { value, done } = await reader.read();
+      if(done) break;
+      acc += decoder.decode(value);
+      botEl.textContent = acc;
+      body.scrollTop = body.scrollHeight;
+    }
+    messages[messages.length-1] = { role:"assistant", content: botEl.textContent };
+    botEl.innerHTML += '<br><br><a class="phc-link" href="https://purelyhomecare.carrd.co/#contact" target="_blank" rel="noopener">Start with our enquiry form</a> or email <a class="phc-link" href="mailto:hello@purelyhomecare.co.uk">hello@purelyhomecare.co.uk</a>.';
+  }
+
+  send.addEventListener('click', ask);
+  input.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); ask(); } });
+
+  // Welcome message
+  body.innerHTML = '<div class="phc-msg bot">Hi — I’m the Purely Homecare Assistant. I can explain services, visit lengths and Scotland’s SDS funding, and show how to get started. What would you like to know?</div>';
+})();
+</script>
